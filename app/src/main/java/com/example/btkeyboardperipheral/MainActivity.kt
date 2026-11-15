@@ -1,6 +1,7 @@
 package com.example.btkeyboardperipheral
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.pm.PackageManager
 import android.os.Build
@@ -10,8 +11,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import java.util.*
 
+@SuppressLint("MissingPermission")
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
@@ -22,23 +23,23 @@ class MainActivity : AppCompatActivity() {
     private var hidDeviceService: BluetoothHidDevice? = null
     private var connectedHost: BluetoothDevice? = null
 
-    // Standard HID Keyboard Report Descriptor
-    private val keyboardReportDescriptor = byteArrayOf(
+    // Standard HID Keyboard Report Descriptor (Kotlin byte-safe)
+    private val keyboardReportDescriptor = intArrayOf(
         0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07,
         0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
         0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x95, 0x01,
         0x75, 0x08, 0x81, 0x01, 0x05, 0x07, 0x19, 0x00,
         0x29, 0x65, 0x15, 0x00, 0x25, 0x65, 0x75, 0x08,
         0x95, 0x06, 0x81, 0x00, 0xC0
-    )
+    ).map { it.toByte() }.toByteArray()
 
     private val hidCallback = object : BluetoothHidDevice.Callback() {
-        override fun onAppStatusChanged(plug: BluetoothDevice?, registered: Boolean) {
-            super.onAppStatusChanged(plug, registered)
+        override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
+            super.onAppStatusChanged(pluggedDevice, registered)
             runOnUiThread {
                 if (registered) {
-                    statusText.text = "Status: HID Registered & Advertising"
-                    Toast.makeText(this@MainActivity, "HID Service Ready", Toast.LENGTH_SHORT).show()
+                    statusText.text = "Status: HID Ready & Broadcasting"
+                    Toast.makeText(this@MainActivity, "HID Registered", Toast.LENGTH_SHORT).show()
                 } else {
                     statusText.text = "Status: HID Unregistered"
                 }
@@ -53,7 +54,6 @@ class MainActivity : AppCompatActivity() {
                         connectedHost = device
                         statusText.text = "Status: Connected to TV!"
                         btnSendKey.isEnabled = true
-                        Toast.makeText(this@MainActivity, "Connected to Host", Toast.LENGTH_SHORT).show()
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         connectedHost = null
@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
                 registerHidApp()
             }
         }
+
         override fun onServiceDisconnected(profile: Int) {
             if (profile == BluetoothProfile.HID_DEVICE) {
                 hidDeviceService = null
@@ -101,20 +102,27 @@ class MainActivity : AppCompatActivity() {
     private fun checkPermissionsAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE), 101)
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.BLUETOOTH_ADVERTISE,
+                        Manifest.permission.BLUETOOTH_SCAN
+                    ),
+                    101
+                )
                 return
             }
         }
-        
         bluetoothAdapter?.getProfileProxy(this, profileListener, BluetoothProfile.HID_DEVICE)
     }
 
     private fun registerHidApp() {
         val sdp = BluetoothHidDeviceAppSdpSettings(
-            "Bluetooth Keyboard",
-            "Custom Peripheral Keyboard",
-            "CustomAndroid",
-            BluetoothHidDevice.SUBCLASS_KEYBOARD,
+            "BT Keyboard",
+            "Android HID Keyboard",
+            "Android",
+            BluetoothHidDevice.SUBCLASS1_COMBO,
             keyboardReportDescriptor
         )
 
@@ -123,21 +131,16 @@ class MainActivity : AppCompatActivity() {
             800, 9, 9, 11250, 11250
         )
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-            hidDeviceService?.registerApp(sdp, null, qosOut, Runnable::run, hidCallback)
-        }
+        hidDeviceService?.registerApp(sdp, null, qosOut, { it.run() }, hidCallback)
     }
 
     private fun sendKeyPress() {
         val device = connectedHost ?: return
-        // Standard HID report packet for pressing and releasing the 'Enter' key (KeyCode 0x28)
         val pressReport = byteArrayOf(0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00)
         val releaseReport = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-            hidDeviceService?.sendReport(device, 0, pressReport)
-            hidDeviceService?.sendReport(device, 0, releaseReport)
-            Toast.makeText(this, "Keystroke Sent!", Toast.LENGTH_SHORT).show()
-        }
+        hidDeviceService?.sendReport(device, 0, pressReport)
+        hidDeviceService?.sendReport(device, 0, releaseReport)
+        Toast.makeText(this, "Enter Key Sent!", Toast.LENGTH_SHORT).show()
     }
 }
